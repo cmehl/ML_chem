@@ -103,45 +103,16 @@ def compute_nn_cantera_0D_homo(device, model, Xscaler, Yscaler, phi_ini, tempera
 
         simtime += dt
 
-        T_m1 = np.copy(state_current[0])
-        Yk_m1 = np.copy(state_current[1:])
-
         # Gas object modification
         try:
-            gas.TPY= T_m1, p, Yk_m1
+            gas.TPY= state_current[0], p, state_current[1:]
         except ct.CanteraError:   # If crash we set solution to zero
             state_current = np.zeros(len(state_current))
             state_save = np.vstack([state_save,state_current])
             crashed = True
             continue
 
-        # Log transform
-        if log_transform:
-            state_current[state_current<threshold] = threshold
-            state_current[1:] = np.log(state_current[1:])
-
-        # Scaling
-        state_current_scaled = (state_current-Xscaler.mean.values)/(Xscaler.std.values+1.0e-7)
-        state_current_scaled = state_current_scaled.reshape(-1, 1).T
-
-
-        # Apply NN
-        with torch.no_grad():
-            NN_input = torch.from_numpy(state_current_scaled).to(device)
-            Y_new = model(NN_input)
-        #Back to cpu numpy
-        Y_new = Y_new.cpu().numpy()
-
-        # De-transform
-        Y_new = Yscaler.mean.values + Y_new * (Yscaler.std.values+1.0e-7)
-
-        # De-log
-        if log_transform:
-           Y_new = np.exp(Y_new)
-
-
-        # Deducing T from energy conservation
-        T_new = T_m1 - (1/gas.cp)*np.sum(gas.partial_molar_enthalpies/gas.molecular_weights*(Y_new-Yk_m1))
+        T_new, Y_new = advance_ANN(state_current, model, Xscaler, Yscaler, gas, log_transform, threshold, device)
 
         state_current = np.append(T_new, Y_new)
 
@@ -180,8 +151,49 @@ def compute_nn_cantera_0D_homo(device, model, Xscaler, Yscaler, phi_ini, tempera
     arr_nn = np.hstack([time_vect.reshape(-1,1), state_save, sum_Yk.reshape(-1,1), Ye])
     df_ann = pd.DataFrame(data=arr_nn, columns=cols_nn)
 
+    fail = 0
+    if crashed:
+        fail = 1
 
-    return df_exact, df_ann
+    return df_exact, df_ann, fail
+
+
+
+
+def advance_ANN(state_current, model, Xscaler, Yscaler, gas, log_transform, threshold, device):
+
+    T_m1 = np.copy(state_current[0])
+    Yk_m1 = np.copy(state_current[1:])
+
+    # Log transform
+    if log_transform:
+        state_current[state_current<threshold] = threshold
+        state_current[1:] = np.log(state_current[1:])
+
+    # Scaling
+    state_current_scaled = (state_current-Xscaler.mean.values)/(Xscaler.std.values+1.0e-7)
+    state_current_scaled = state_current_scaled.reshape(-1, 1).T
+
+
+    # Apply NN
+    with torch.no_grad():
+        NN_input = torch.from_numpy(state_current_scaled).to(device)
+        Y_new = model(NN_input)
+    #Back to cpu numpy
+    Y_new = Y_new.cpu().numpy()
+
+    # De-transform
+    Y_new = Yscaler.mean.values + Y_new * (Yscaler.std.values+1.0e-7)
+
+    # De-log
+    if log_transform:
+        Y_new = np.exp(Y_new)
+
+
+    # Deducing T from energy conservation
+    T_new = T_m1 - (1/gas.cp)*np.sum(gas.partial_molar_enthalpies/gas.molecular_weights*(Y_new-Yk_m1))
+
+    return T_new, Y_new
 
 
 

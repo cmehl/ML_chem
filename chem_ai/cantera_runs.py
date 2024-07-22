@@ -4,8 +4,6 @@ import cantera as ct
 
 import torch
 
-from chem_ai.utils import get_molar_mass_atomic_matrix
-
 
 import warnings
 # Suppress only the DataConversionWarning from scikit-learn
@@ -15,7 +13,7 @@ warnings.filterwarnings(action='ignore', category=UserWarning)
 # HOMOGENEOUS REACTOR
 #-------------------------------------------------------------------
 
-def compute_nn_cantera_0D_homo(device, model, Xscaler, Yscaler, phi_ini, temperature_ini, dt, dtb_params):
+def compute_nn_cantera_0D_homo(device, model, Xscaler, Yscaler, phi_ini, temperature_ini, dt, dtb_params, A_element):
 
     log_transform = dtb_params["log_transform"]
     threshold = dtb_params["threshold"]
@@ -28,10 +26,6 @@ def compute_nn_cantera_0D_homo(device, model, Xscaler, Yscaler, phi_ini, tempera
 
     species_list = gas.species_names
     nb_spec = len(species_list)
-
-    # Atomic elements matrix
-    gas = ct.Solution(mech_file)
-    A_element = get_molar_mass_atomic_matrix(gas.species_names, fuel, True)
 
     # Setting composition
     fuel_ox_ratio = gas.n_atoms(fuel,'C') + 0.25*gas.n_atoms(fuel,'H') - 0.5*gas.n_atoms(fuel,'O')

@@ -200,10 +200,10 @@ class Database_HomoReac(object):
         # DOE for multi_dt
         if self.multi_dt:
             # Normal version
-            # self.dt_array = np.random.uniform(low=0.0, high=self.dt_cfd, size=(self.data_simu.shape[0], self.nb_dt))
+            self.dt_array = np.random.uniform(low=0.0, high=self.dt_cfd, size=(self.data_simu.shape[0], self.nb_dt))
             # Log version
-            self.dt_array = np.random.uniform(low=np.log(1.0e-8), high=np.log(self.dt_cfd), size=(self.data_simu.shape[0], self.nb_dt))
-            self.dt_array = np.exp(self.dt_array)
+            # self.dt_array = np.random.uniform(low=np.log(1.0e-8), high=np.log(self.dt_cfd), size=(self.data_simu.shape[0], self.nb_dt))
+            # self.dt_array = np.exp(self.dt_array)
 
         if self.multi_dt:
             self.dt_array_train, self.X_train, self.Y_train = self._get_X_Y_multi_dt(self.id_sim_train)

@@ -13,7 +13,7 @@ warnings.filterwarnings(action='ignore', category=UserWarning)
 # HOMOGENEOUS REACTOR
 #-------------------------------------------------------------------
 
-def compute_nn_cantera_0D_homo(device, model, Xscaler, Yscaler, phi_ini, temperature_ini, dt, dtb_params, A_element):
+def compute_nn_cantera_0D_homo(device, model, Xscaler, Yscaler, phi_ini, temperature_ini, dt, dtb_params, A_element, multi_dt, Tscaler):
 
     log_transform = dtb_params["log_transform"]
     threshold = dtb_params["threshold"]
@@ -106,7 +106,7 @@ def compute_nn_cantera_0D_homo(device, model, Xscaler, Yscaler, phi_ini, tempera
             crashed = True
             continue
 
-        T_new, Y_new = advance_ANN(state_current, model, Xscaler, Yscaler, gas, log_transform, threshold, device)
+        T_new, Y_new = advance_ANN(state_current, model, Xscaler, Yscaler, Tscaler, dt, multi_dt, gas, log_transform, threshold, device)
 
         state_current = np.append(T_new, Y_new)
 
@@ -154,7 +154,7 @@ def compute_nn_cantera_0D_homo(device, model, Xscaler, Yscaler, phi_ini, tempera
 
 
 
-def advance_ANN(state_current, model, Xscaler, Yscaler, gas, log_transform, threshold, device):
+def advance_ANN(state_current, model, Xscaler, Yscaler, Tscaler, dt, multi_dt, gas, log_transform, threshold, device):
 
     T_m1 = np.copy(state_current[0])
     Yk_m1 = np.copy(state_current[1:])
@@ -165,19 +165,31 @@ def advance_ANN(state_current, model, Xscaler, Yscaler, gas, log_transform, thre
         state_current[1:] = np.log(state_current[1:])
 
     # Scaling
-    state_current_scaled = (state_current-Xscaler.mean.values)/(Xscaler.std.values+1.0e-7)
-    state_current_scaled = state_current_scaled.reshape(-1, 1).T
+    if multi_dt:
+        state_current_scaled = (state_current-Xscaler.mean)/(Xscaler.std+1.0e-7)
+        state_current_scaled = state_current_scaled.reshape(-1, 1).T
+    else:
+        state_current_scaled = (state_current-Xscaler.mean.values)/(Xscaler.std.values+1.0e-7)
+        state_current_scaled = state_current_scaled.reshape(-1, 1).T
 
+    # If multi dt we add (scaled) time
+    if multi_dt:
+        dt_scaled = (dt-Tscaler.mean)/(Tscaler.std+1.0e-7)
+        state_current_scaled = np.append(state_current_scaled, dt_scaled)
 
     # Apply NN
     with torch.no_grad():
         NN_input = torch.from_numpy(state_current_scaled).to(device)
+        print(NN_input)
         Y_new = model(NN_input)
     #Back to cpu numpy
     Y_new = Y_new.cpu().numpy()
 
     # De-transform
-    Y_new = Yscaler.mean.values + Y_new * (Yscaler.std.values+1.0e-7)
+    if multi_dt:
+        Y_new = Yscaler.mean[1:] + Y_new * (Yscaler.std[1:]+1.0e-7)
+    else:
+        Y_new = Yscaler.mean.values + Y_new * (Yscaler.std.values+1.0e-7)
 
     # De-log
     if log_transform:

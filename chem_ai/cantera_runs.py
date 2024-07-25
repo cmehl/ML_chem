@@ -180,7 +180,6 @@ def advance_ANN(state_current, model, Xscaler, Yscaler, Tscaler, dt, multi_dt, g
     # Apply NN
     with torch.no_grad():
         NN_input = torch.from_numpy(state_current_scaled).to(device)
-        print(NN_input)
         Y_new = model(NN_input)
     #Back to cpu numpy
     Y_new = Y_new.cpu().numpy()

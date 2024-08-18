@@ -169,7 +169,7 @@ class Database_HomoReac(object):
 
 
 
-    def generate_train_valid_test(self, valid_ratio, test_ratio):
+    def generate_train_valid_test(self, valid_ratio, test_ratio, dt_max):
 
         # In this function we use the 0D reactors runs to build the X_train, Y_train, X_val, Y_val, X_test, Y_test data
         # Train, validation and test are based on simulations numbers, not states
@@ -202,7 +202,7 @@ class Database_HomoReac(object):
             # Normal version
             # self.dt_array = np.random.uniform(low=0.0, high=self.dt_cfd, size=(self.data_simu.shape[0], self.nb_dt))
             # Log version
-            self.dt_array = np.random.uniform(low=np.log(1.0e-8), high=np.log(self.dt_cfd), size=(self.data_simu.shape[0], self.nb_dt))
+            self.dt_array = np.random.uniform(low=np.log(self.dt_cfd), high=np.log(dt_max), size=(self.data_simu.shape[0], self.nb_dt))
             self.dt_array = np.exp(self.dt_array)
 
         if self.multi_dt:

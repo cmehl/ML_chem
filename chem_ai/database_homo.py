@@ -5,6 +5,9 @@ import pandas as pd
 import matplotlib.pyplot as plt
 import cantera as ct
 
+import seaborn as sns
+sns.set_style("darkgrid")
+
 from sklearn.model_selection import train_test_split
 
 

@@ -39,9 +39,15 @@ class DatabaseFlamelets(object):
             cols = ['Temperature'] + ['Pressure'] + gas.species_names + ['enthalpy'] + ['reactor_type'] + ['Simulation number']
             self.df = pd.DataFrame(data=[], columns=cols)
 
+            self.includes_0d_reactors = False
+            self.includes_1d_prem = False
+            self.includes_1d_diff = False
+
 
 
     def compute_0d_reactors(self, phi_bounds, T0_bounds, n_samples, max_sim_time, solve_mode = "dt_cfd"):
+
+        self.includes_0d_reactors = True
          
         self.n_samples_0D = n_samples
         self.sim_numbers_0D = np.arange(n_samples)
@@ -172,6 +178,8 @@ class DatabaseFlamelets(object):
 
 
     def compute_1d_premixed(self, phi_bounds, T0_bounds, n_samples):
+
+        self.includes_1d_prem = True
          
         self.n_samples_1D_prem = n_samples
         self.sim_numbers_1D_prem = np.arange(n_samples)
@@ -282,6 +290,8 @@ class DatabaseFlamelets(object):
 
 
     def compute_1d_diffusion(self, strain_bounds, T0_bounds, n_samples, width):
+
+        self.includes_1d_diff = True
          
         self.n_samples_1D_diff = n_samples
         self.sim_numbers_1D_diff = np.arange(n_samples)
@@ -410,15 +420,17 @@ class DatabaseFlamelets(object):
         self.df_augmented = pd.DataFrame(data=[], columns=cols)
 
 
+        if self.includes_0d_reactors:
+            max_values_0D = self.df[self.df["reactor_type"]==0].max()    # We should probably do it by simulation type !!
+            min_values_0D = self.df[self.df["reactor_type"]==0].min()
 
-        max_values_0D = self.df[self.df["reactor_type"]==0].max()    # We should probably do it by simulation type !!
-        min_values_0D = self.df[self.df["reactor_type"]==0].min()
+        if self.includes_1d_prem:
+            max_values_1D_prem = self.df[self.df["reactor_type"]==1].max()    # We should probably do it by simulation type !!
+            min_values_1D_prem = self.df[self.df["reactor_type"]==1].min()
 
-        max_values_1D_prem = self.df[self.df["reactor_type"]==1].max()    # We should probably do it by simulation type !!
-        min_values_1D_prem = self.df[self.df["reactor_type"]==1].min()
-
-        max_values_1D_diff = self.df[self.df["reactor_type"]==2].max()    # We should probably do it by simulation type !!
-        min_values_1D_diff = self.df[self.df["reactor_type"]==2].min()
+        if self.includes_1d_diff:
+            max_values_1D_diff = self.df[self.df["reactor_type"]==2].max()    # We should probably do it by simulation type !!
+            min_values_1D_diff = self.df[self.df["reactor_type"]==2].min()
 
         # Data augmentation based on the work of Ding et al. (HFRD method)
         for i, row in self.df.iterrows():
@@ -510,74 +522,85 @@ class DatabaseFlamelets(object):
         # In this function we use the flames runs to build the X_train, Y_train, X_val, Y_val, X_test, Y_test data
         # Train, validation and test are based on simulations numbers, not states
         # 0D reactors
-        self.id_sim_train_0D, self.id_sim_val_0D = train_test_split(self.sim_numbers_0D, test_size=valid_ratio, random_state=24)
-        self.id_sim_train_0D, self.id_sim_test_0D = train_test_split(self.id_sim_train_0D, test_size=test_ratio, random_state=12)
-        #
-        self.df_ODE_train_0D = self.df_ODE_0D[self.df_ODE_0D["sim_number"].isin(self.id_sim_train_0D)]
-        self.df_ODE_val_0D = self.df_ODE_0D[self.df_ODE_0D["sim_number"].isin(self.id_sim_val_0D)]
-        self.df_ODE_test_0D = self.df_ODE_0D[self.df_ODE_0D["sim_number"].isin(self.id_sim_test_0D)]
-        #
-        self.df_ODE_train_0D.to_csv(os.path.join(self.folder,"sim_train_0D.csv"), index=False)
-        self.df_ODE_val_0D.to_csv(os.path.join(self.folder,"sim_val_0D.csv"), index=False)
-        self.df_ODE_test_0D.to_csv(os.path.join(self.folder,"sim_test_0D.csv"), index=False)
+        if self.includes_0d_reactors:
+            self.id_sim_train_0D, self.id_sim_val_0D = train_test_split(self.sim_numbers_0D, test_size=valid_ratio, random_state=24)
+            self.id_sim_train_0D, self.id_sim_test_0D = train_test_split(self.id_sim_train_0D, test_size=test_ratio, random_state=12)
+            #
+            self.df_ODE_train_0D = self.df_ODE_0D[self.df_ODE_0D["sim_number"].isin(self.id_sim_train_0D)]
+            self.df_ODE_val_0D = self.df_ODE_0D[self.df_ODE_0D["sim_number"].isin(self.id_sim_val_0D)]
+            self.df_ODE_test_0D = self.df_ODE_0D[self.df_ODE_0D["sim_number"].isin(self.id_sim_test_0D)]
+            #
+            self.df_ODE_train_0D.to_csv(os.path.join(self.folder,"sim_train_0D.csv"), index=False)
+            self.df_ODE_val_0D.to_csv(os.path.join(self.folder,"sim_val_0D.csv"), index=False)
+            self.df_ODE_test_0D.to_csv(os.path.join(self.folder,"sim_test_0D.csv"), index=False)
 
-        fig, ax = plt.subplots()
-        ax.scatter(self.df_ODE_train_0D['T0'], self.df_ODE_train_0D['Phi'], color="k", label="Train")
-        ax.scatter(self.df_ODE_val_0D['T0'], self.df_ODE_val_0D['Phi'], color="b", label="Validation")
-        ax.scatter(self.df_ODE_test_0D['T0'], self.df_ODE_test_0D['Phi'], color="r", label="Test")
-        fig.legend(ncol=3)
-        ax.set_xlabel("T0 [K]")
-        ax.set_ylabel("Phi [-]")
-        fig.savefig(os.path.join(self.folder,"doe_0D_reactors.png"))
-
+            fig, ax = plt.subplots()
+            ax.scatter(self.df_ODE_train_0D['T0'], self.df_ODE_train_0D['Phi'], color="k", label="Train")
+            ax.scatter(self.df_ODE_val_0D['T0'], self.df_ODE_val_0D['Phi'], color="b", label="Validation")
+            ax.scatter(self.df_ODE_test_0D['T0'], self.df_ODE_test_0D['Phi'], color="r", label="Test")
+            fig.legend(ncol=3)
+            ax.set_xlabel("T0 [K]")
+            ax.set_ylabel("Phi [-]")
+            fig.savefig(os.path.join(self.folder,"doe_0D_reactors.png"))
+        else:
+            self.id_sim_train_0D = []
+            self.id_sim_val_0D = []
 
 
         # 1D premixed
-        self.id_sim_train_1D_prem, self.id_sim_val_1D_prem = train_test_split(self.sim_numbers_1D_prem, test_size=valid_ratio, random_state=24)
-        self.id_sim_train_1D_prem, self.id_sim_test_1D_prem = train_test_split(self.id_sim_train_1D_prem, test_size=test_ratio, random_state=12)
-        #
-        self.df_ODE_train_1D_prem = self.df_ODE_1D_prem[self.df_ODE_1D_prem["sim_number"].isin(self.id_sim_train_1D_prem)]
-        self.df_ODE_val_1D_prem = self.df_ODE_1D_prem[self.df_ODE_1D_prem["sim_number"].isin(self.id_sim_val_1D_prem)]
-        self.df_ODE_test_1D_prem = self.df_ODE_1D_prem[self.df_ODE_1D_prem["sim_number"].isin(self.id_sim_test_1D_prem)]
-        #
-        self.df_ODE_train_1D_prem.to_csv(os.path.join(self.folder,"sim_train_1D_prem.csv"), index=False)
-        self.df_ODE_val_1D_prem.to_csv(os.path.join(self.folder,"sim_val_1D_prem.csv"), index=False)
-        self.df_ODE_test_1D_prem.to_csv(os.path.join(self.folder,"sim_test_1D_prem.csv"), index=False)
+        if self.includes_1d_prem:
+            self.id_sim_train_1D_prem, self.id_sim_val_1D_prem = train_test_split(self.sim_numbers_1D_prem, test_size=valid_ratio, random_state=24)
+            self.id_sim_train_1D_prem, self.id_sim_test_1D_prem = train_test_split(self.id_sim_train_1D_prem, test_size=test_ratio, random_state=12)
+            #
+            self.df_ODE_train_1D_prem = self.df_ODE_1D_prem[self.df_ODE_1D_prem["sim_number"].isin(self.id_sim_train_1D_prem)]
+            self.df_ODE_val_1D_prem = self.df_ODE_1D_prem[self.df_ODE_1D_prem["sim_number"].isin(self.id_sim_val_1D_prem)]
+            self.df_ODE_test_1D_prem = self.df_ODE_1D_prem[self.df_ODE_1D_prem["sim_number"].isin(self.id_sim_test_1D_prem)]
+            #
+            self.df_ODE_train_1D_prem.to_csv(os.path.join(self.folder,"sim_train_1D_prem.csv"), index=False)
+            self.df_ODE_val_1D_prem.to_csv(os.path.join(self.folder,"sim_val_1D_prem.csv"), index=False)
+            self.df_ODE_test_1D_prem.to_csv(os.path.join(self.folder,"sim_test_1D_prem.csv"), index=False)
 
-        fig, ax = plt.subplots()
-        ax.scatter(self.df_ODE_train_1D_prem['T0'], self.df_ODE_train_1D_prem['Phi'], color="k", label="Train")
-        ax.scatter(self.df_ODE_val_1D_prem['T0'], self.df_ODE_val_1D_prem['Phi'], color="b", label="Validation")
-        ax.scatter(self.df_ODE_test_1D_prem['T0'], self.df_ODE_test_1D_prem['Phi'], color="r", label="Test")
-        fig.legend(ncol=3)
-        ax.set_xlabel("T0 [K]")
-        ax.set_ylabel("Phi [-]")
-        fig.savefig(os.path.join(self.folder,"doe_1D_prem_flames.png"))
+            fig, ax = plt.subplots()
+            ax.scatter(self.df_ODE_train_1D_prem['T0'], self.df_ODE_train_1D_prem['Phi'], color="k", label="Train")
+            ax.scatter(self.df_ODE_val_1D_prem['T0'], self.df_ODE_val_1D_prem['Phi'], color="b", label="Validation")
+            ax.scatter(self.df_ODE_test_1D_prem['T0'], self.df_ODE_test_1D_prem['Phi'], color="r", label="Test")
+            fig.legend(ncol=3)
+            ax.set_xlabel("T0 [K]")
+            ax.set_ylabel("Phi [-]")
+            fig.savefig(os.path.join(self.folder,"doe_1D_prem_flames.png"))
+        else:
+            self.id_sim_train_1D_prem = []
+            self.id_sim_val_1D_prem = []
 
 
         #1D diffusion
-        self.id_sim_train_1D_diff, self.id_sim_val_1D_diff = train_test_split(self.sim_numbers_1D_diff, test_size=valid_ratio, random_state=24)
-        self.id_sim_train_1D_diff, self.id_sim_test_1D_diff = train_test_split(self.id_sim_train_1D_diff, test_size=test_ratio, random_state=12)
-        #
-        self.df_ODE_train_1D_diff = self.df_ODE_1D_diff[self.df_ODE_1D_diff["sim_number"].isin(self.id_sim_train_1D_diff)]
-        self.df_ODE_val_1D_diff = self.df_ODE_1D_diff[self.df_ODE_1D_diff["sim_number"].isin(self.id_sim_val_1D_diff)]
-        self.df_ODE_test_1D_diff = self.df_ODE_1D_diff[self.df_ODE_1D_diff["sim_number"].isin(self.id_sim_test_1D_diff)]
-        #
-        self.df_ODE_train_1D_diff.to_csv(os.path.join(self.folder,"sim_train_1D_diff.csv"), index=False)
-        self.df_ODE_val_1D_diff.to_csv(os.path.join(self.folder,"sim_val_1D_diff.csv"), index=False)
-        self.df_ODE_test_1D_diff.to_csv(os.path.join(self.folder,"sim_test_1D_diff.csv"), index=False)
+        if self.includes_1d_diff:
+            self.id_sim_train_1D_diff, self.id_sim_val_1D_diff = train_test_split(self.sim_numbers_1D_diff, test_size=valid_ratio, random_state=24)
+            self.id_sim_train_1D_diff, self.id_sim_test_1D_diff = train_test_split(self.id_sim_train_1D_diff, test_size=test_ratio, random_state=12)
+            #
+            self.df_ODE_train_1D_diff = self.df_ODE_1D_diff[self.df_ODE_1D_diff["sim_number"].isin(self.id_sim_train_1D_diff)]
+            self.df_ODE_val_1D_diff = self.df_ODE_1D_diff[self.df_ODE_1D_diff["sim_number"].isin(self.id_sim_val_1D_diff)]
+            self.df_ODE_test_1D_diff = self.df_ODE_1D_diff[self.df_ODE_1D_diff["sim_number"].isin(self.id_sim_test_1D_diff)]
+            #
+            self.df_ODE_train_1D_diff.to_csv(os.path.join(self.folder,"sim_train_1D_diff.csv"), index=False)
+            self.df_ODE_val_1D_diff.to_csv(os.path.join(self.folder,"sim_val_1D_diff.csv"), index=False)
+            self.df_ODE_test_1D_diff.to_csv(os.path.join(self.folder,"sim_test_1D_diff.csv"), index=False)
 
-        fig, ax = plt.subplots()
-        ax.scatter(self.df_ODE_train_1D_diff['T0'], self.df_ODE_train_1D_diff['Strain'], color="k", label="Train")
-        ax.scatter(self.df_ODE_val_1D_diff['T0'], self.df_ODE_val_1D_diff['Strain'], color="b", label="Validation")
-        ax.scatter(self.df_ODE_test_1D_diff['T0'], self.df_ODE_test_1D_diff['Strain'], color="r", label="Test")
-        fig.legend(ncol=3)
-        ax.set_xlabel("T0 [K]")
-        ax.set_ylabel("$K_s$ [-]")
-        fig.savefig(os.path.join(self.folder,"doe_1D_diff_flames.png"))
+            fig, ax = plt.subplots()
+            ax.scatter(self.df_ODE_train_1D_diff['T0'], self.df_ODE_train_1D_diff['Strain'], color="k", label="Train")
+            ax.scatter(self.df_ODE_val_1D_diff['T0'], self.df_ODE_val_1D_diff['Strain'], color="b", label="Validation")
+            ax.scatter(self.df_ODE_test_1D_diff['T0'], self.df_ODE_test_1D_diff['Strain'], color="r", label="Test")
+            fig.legend(ncol=3)
+            ax.set_xlabel("T0 [K]")
+            ax.set_ylabel("$K_s$ [-]")
+            fig.savefig(os.path.join(self.folder,"doe_1D_diff_flames.png"))
+        else:
+            self.id_sim_train_1D_diff = []
+            self.id_sim_val_1D_diff = []
 
 
 
-        self.X_train, self.Y_train = self._get_X_Y(self.id_sim_train_0D, self.id_sim_train_1D_prem, self.id_sim_train_1D_prem)
+        self.X_train, self.Y_train = self._get_X_Y(self.id_sim_train_0D, self.id_sim_train_1D_prem, self.id_sim_train_1D_diff)
         self.X_val, self.Y_val = self._get_X_Y(self.id_sim_val_0D, self.id_sim_val_1D_prem, self.id_sim_val_1D_diff)
         # self.X_test, self.Y_test = self._get_X_Y(self.id_sim_test)   -> not needed as we will test on trajectories, not points
 

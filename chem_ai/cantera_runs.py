@@ -13,7 +13,7 @@ warnings.filterwarnings(action='ignore', category=UserWarning)
 # HOMOGENEOUS REACTOR
 #-------------------------------------------------------------------
 
-def compute_nn_cantera_0D_homo(device, model, Xscaler, Yscaler, phi_ini, temperature_ini, dt, dtb_params, A_element, multi_dt, Tscaler):
+def compute_nn_cantera_0D_homo(device, model, Xscaler, Yscaler, phi_ini, temperature_ini, dt, dtb_params, A_element, multi_dt, Tscaler, node):
 
     log_transform = dtb_params["log_transform"]
     threshold = dtb_params["threshold"]
@@ -106,7 +106,7 @@ def compute_nn_cantera_0D_homo(device, model, Xscaler, Yscaler, phi_ini, tempera
             crashed = True
             continue
 
-        T_new, Y_new = advance_ANN(state_current, model, Xscaler, Yscaler, Tscaler, dt, multi_dt, gas, log_transform, threshold, device)
+        T_new, Y_new = advance_ANN(state_current, model, Xscaler, Yscaler, Tscaler, dt, multi_dt, gas, log_transform, threshold, device, node)
 
         state_current = np.append(T_new, Y_new)
 
@@ -154,7 +154,7 @@ def compute_nn_cantera_0D_homo(device, model, Xscaler, Yscaler, phi_ini, tempera
 
 
 
-def advance_ANN(state_current, model, Xscaler, Yscaler, Tscaler, dt, multi_dt, gas, log_transform, threshold, device):
+def advance_ANN(state_current, model, Xscaler, Yscaler, Tscaler, dt, multi_dt, gas, log_transform, threshold, device, node):
 
     T_m1 = np.copy(state_current[0])
     Yk_m1 = np.copy(state_current[1:])
@@ -173,30 +173,42 @@ def advance_ANN(state_current, model, Xscaler, Yscaler, Tscaler, dt, multi_dt, g
         state_current_scaled = state_current_scaled.reshape(-1, 1).T
 
     # If multi dt we add (scaled) time
-    if multi_dt:
+    if multi_dt and node==False:
         dt_scaled = (dt-Tscaler.mean)/(Tscaler.std+1.0e-7)
         state_current_scaled = np.append(state_current_scaled, dt_scaled)
 
     # Apply NN
     with torch.no_grad():
         NN_input = torch.from_numpy(state_current_scaled).to(device)
-        Y_new = model(NN_input)
+        if node:
+            integration_times = torch.tensor([0,dt], dtype=torch.float64)
+            Y_new = model(NN_input, integration_time=integration_times)[1]
+        else:
+            Y_new = model(NN_input.reshape(1,-1))
+            # Y_new = Y_new.reshape(1,1)
+
     #Back to cpu numpy
     Y_new = Y_new.cpu().numpy()
 
     # De-transform
-    if multi_dt:
+    if multi_dt and node==False:
         Y_new = Yscaler.mean[1:] + Y_new * (Yscaler.std[1:]+1.0e-7)
+    elif multi_dt and node==True:
+        Y_new = Yscaler.mean + Y_new * (Yscaler.std+1.0e-7)
     else:
         Y_new = Yscaler.mean.values + Y_new * (Yscaler.std.values+1.0e-7)
+
+    if multi_dt and node:
+        T_new = Y_new[0,0]
+        Y_new = Y_new[0,1:]
 
     # De-log
     if log_transform:
         Y_new = np.exp(Y_new)
 
-
     # Deducing T from energy conservation
-    T_new = T_m1 - (1/gas.cp)*np.sum(gas.partial_molar_enthalpies/gas.molecular_weights*(Y_new-Yk_m1))
+    if node==False:
+        T_new = T_m1 - (1/gas.cp)*np.sum(gas.partial_molar_enthalpies/gas.molecular_weights*(Y_new-Yk_m1))
 
     return T_new, Y_new
 

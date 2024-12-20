@@ -10,7 +10,7 @@ from sklearn.model_selection import train_test_split
 
 class Database_HomoReac(object):
 
-    def __init__(self, mech_file, fuel, folder, p, phi_bounds, T0_bounds, n_samples, dt_cfd, max_sim_time, solve_mode, multi_dt, nb_dt):
+    def __init__(self, mech_file, fuel, folder, p, phi_bounds, T0_bounds, n_samples, dt_cfd, max_sim_time, solve_mode, multi_dt, nb_dt, node_sampling):
 
         self.mech_file = mech_file
         self.fuel = fuel
@@ -39,6 +39,7 @@ class Database_HomoReac(object):
         # Multiple time steps
         self.multi_dt = multi_dt
         self.nb_dt = nb_dt
+        self.node_sampling = node_sampling
 
 
 
@@ -199,11 +200,23 @@ class Database_HomoReac(object):
 
         # DOE for multi_dt
         if self.multi_dt:
-            # Normal version
-            # self.dt_array = np.random.uniform(low=0.0, high=self.dt_cfd, size=(self.data_simu.shape[0], self.nb_dt))
-            # Log version
-            self.dt_array = np.random.uniform(low=np.log(self.dt_cfd), high=np.log(dt_max), size=(self.data_simu.shape[0], self.nb_dt))
-            self.dt_array = np.exp(self.dt_array)
+            #If NODE, we set the same dt's for each sample, to ease the NODE integration and the loss function calculation
+            if self.node_sampling:
+                self.dt_array = np.empty((self.data_simu.shape[0], self.nb_dt))
+                dt_vect = np.linspace(np.log(self.dt_cfd), np.log(dt_max), self.nb_dt)
+                dt_vect = np.exp(dt_vect)
+                for k in range(self.dt_array.shape[0]):
+                    self.dt_array[k,:] = dt_vect
+            else:
+                # Normal version
+                # self.dt_array = np.random.uniform(low=0.0, high=self.dt_cfd, size=(self.data_simu.shape[0], self.nb_dt))
+                # Log version
+                self.dt_array = np.random.uniform(low=np.log(self.dt_cfd), high=np.log(dt_max), size=(self.data_simu.shape[0], self.nb_dt))
+                self.dt_array = np.exp(self.dt_array)
+                #
+                # If NODE sampling, we sort the dt's
+                # if self.node_sampling:
+                #     self.dt_array = np.sort(self.dt_array, axis=1)
 
         if self.multi_dt:
             self.dt_array_train, self.X_train, self.Y_train = self._get_X_Y_multi_dt(self.id_sim_train)
@@ -311,9 +324,6 @@ class Database_HomoReac(object):
 
     def _get_X_Y_multi_dt(self, simu_ids):
 
-        X_list = []
-        Y_list = []
-
         # Cantera gas object
         self.gas = ct.Solution(self.mech_file)
 
@@ -323,17 +333,19 @@ class Database_HomoReac(object):
 
         # Initializing X and Y
         X = np.empty((df_ids.shape[0],df_ids.shape[1]-2)) # -2 because we remove Pressure and Time
-        Y = np.empty((df_ids.shape[0],df_ids.shape[1]-3,self.nb_dt)) # -2 because we remove Pressure, Time and temperature
+        if self.node_sampling:
+            Y = np.empty((df_ids.shape[0],df_ids.shape[1]-2,self.nb_dt))
+        else:
+            Y = np.empty((df_ids.shape[0],df_ids.shape[1]-3,self.nb_dt)) # -2 because we remove Pressure, Time and temperature
 
         # Filling X
         X[:,0] = df_ids["Temperature"]
         X[:,1:] = df_ids.iloc[:,2:-1]
 
-        for i_dt in range(self.nb_dt):
 
-            for i in range(X.shape[0]):
+        for i in range(X.shape[0]):
 
-                dt = dt_array_red[i,i_dt]
+            if self.node_sampling:  # We compute a single trajectory along all dt's
 
                 T = X[i,0]
                 Yk = X[i,1:]
@@ -342,15 +354,44 @@ class Database_HomoReac(object):
 
                 # Constant pressure reactor
                 r = ct.IdealGasConstPressureReactor(self.gas)
-                
+
                 # Initializing reactor
                 sim = ct.ReactorNet([r])
                 
-                # Advancing to dt
-                sim.advance(dt)
+                for i_dt in range(self.nb_dt):
 
-                # Updated state
-                Y[i,:,i_dt] = self.gas.Y
+                    dt = dt_array_red[i,i_dt]
+
+                    # Advancing to dt (each time from previous dt value thus advancing on the trajectory)
+                    sim.advance(dt)
+
+                    # Updated state
+                    Y[i,0,i_dt] = self.gas.T
+                    Y[i,1:,i_dt] = self.gas.Y
+
+            else:  #We compute solution at t+dt for each dt, starting from initial state
+
+                for i_dt in range(self.nb_dt):
+
+                    dt = dt_array_red[i,i_dt]
+
+                    T = X[i,0]
+                    Yk = X[i,1:]
+
+                    self.gas.TPY = T, self.p, Yk
+
+                    # Constant pressure reactor
+                    r = ct.IdealGasConstPressureReactor(self.gas)
+                    
+                    # Initializing reactor
+                    sim = ct.ReactorNet([r])
+                    
+                    # Advancing to dt
+                    sim.advance(dt)
+
+                    # Updated state
+                    Y[i,:,i_dt] = self.gas.Y
+
 
         return dt_array_red, X, Y
     

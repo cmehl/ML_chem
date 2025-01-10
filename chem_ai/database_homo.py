@@ -211,12 +211,19 @@ class Database_HomoReac(object):
                 # Normal version
                 # self.dt_array = np.random.uniform(low=0.0, high=self.dt_cfd, size=(self.data_simu.shape[0], self.nb_dt))
                 # Log version
-                self.dt_array = np.random.uniform(low=np.log(self.dt_cfd), high=np.log(dt_max), size=(self.data_simu.shape[0], self.nb_dt))
-                self.dt_array = np.exp(self.dt_array)
+                # self.dt_array = np.random.uniform(low=np.log(self.dt_cfd), high=np.log(dt_max), size=(self.data_simu.shape[0], self.nb_dt))
+                # self.dt_array = np.exp(self.dt_array)
                 #
                 # If NODE sampling, we sort the dt's
                 # if self.node_sampling:
                 #     self.dt_array = np.sort(self.dt_array, axis=1)
+
+                # Version imposing lowest dt
+                self.dt_array = np.empty(((self.data_simu.shape[0], self.nb_dt)))
+                self.dt_array[:,0] = self.dt_cfd * np.ones(self.data_simu.shape[0])
+                self.dt_array[:,1:] = np.random.uniform(low=np.log(self.dt_cfd), high=np.log(dt_max), size=(self.data_simu.shape[0], self.nb_dt-1))
+                self.dt_array[:,1:] = np.exp(self.dt_array[:,1:])
+
 
         if self.multi_dt:
             self.dt_array_train, self.X_train, self.Y_train = self._get_X_Y_multi_dt(self.id_sim_train)

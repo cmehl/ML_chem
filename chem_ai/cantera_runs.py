@@ -16,6 +16,7 @@ warnings.filterwarnings(action='ignore', category=UserWarning)
 def compute_nn_cantera_0D_homo(device, model, Xscaler, Yscaler, phi_ini, temperature_ini, dt, dtb_params, A_element, multi_dt_flag, Tscaler, node):
 
     log_transform = dtb_params["log_transform"]
+    predict_differences = dtb_params["predict_differences"]
     threshold = dtb_params["threshold"]
     fuel = dtb_params["fuel"]
     mech_file = dtb_params["mech_file"]
@@ -106,7 +107,7 @@ def compute_nn_cantera_0D_homo(device, model, Xscaler, Yscaler, phi_ini, tempera
             crashed = True
             continue
 
-        T_new, Y_new = advance_ANN(state_current, model, Xscaler, Yscaler, Tscaler, dt, multi_dt_flag, gas, log_transform, threshold, device, node)
+        T_new, Y_new = advance_ANN(state_current, model, Xscaler, Yscaler, Tscaler, dt, multi_dt_flag, gas, log_transform, threshold, predict_differences, device, node)
 
         state_current = np.append(T_new, Y_new)
 
@@ -154,10 +155,18 @@ def compute_nn_cantera_0D_homo(device, model, Xscaler, Yscaler, phi_ini, tempera
 
 
 
-def advance_ANN(state_current, model, Xscaler, Yscaler, Tscaler, dt, multi_dt_flag, gas, log_transform, threshold, device, node):
+def advance_ANN(state_current, model, Xscaler, Yscaler, Tscaler, dt, multi_dt_flag, gas, log_transform, threshold, predict_differences, device, node):
 
     T_m1 = np.copy(state_current[0])
     Yk_m1 = np.copy(state_current[1:])
+
+    if predict_differences:
+        Yk_m1_ini = np.copy(Yk_m1)
+
+        if log_transform:
+            Yk_m1_ini[Yk_m1_ini<threshold] = threshold
+            Yk_m1_ini = np.log(Yk_m1_ini)
+
 
     # Log transform
     if log_transform:
@@ -184,9 +193,11 @@ def advance_ANN(state_current, model, Xscaler, Yscaler, Tscaler, dt, multi_dt_fl
     # Apply NN
     with torch.no_grad():
         NN_input = torch.from_numpy(state_current_scaled).to(device)
+
         if node:
             integration_times = torch.tensor([0,dt], dtype=torch.float64)
             Y_new = model(NN_input, integration_time=integration_times)[1]
+
         else:
             Y_new = model(NN_input.reshape(1,-1))
             # Y_new = Y_new.reshape(1,1)
@@ -195,19 +206,17 @@ def advance_ANN(state_current, model, Xscaler, Yscaler, Tscaler, dt, multi_dt_fl
     Y_new = Y_new.cpu().numpy()
 
     # De-transform
-    if multi_dt_flag==1:
-        if node:
-            Y_new = Yscaler.mean + Y_new * (Yscaler.std+1.0e-7)
-        else:
-            Y_new = Yscaler.mean[1:] + Y_new * (Yscaler.std[1:]+1.0e-7)
-    elif multi_dt_flag==2:
-        Y_new = Yscaler.mean[1:] + Y_new * (Yscaler.std[1:]+1.0e-7)
+    if multi_dt_flag>0:
+        Y_new = Yscaler.mean + Y_new * (Yscaler.std+1.0e-7)
     else:
         Y_new = Yscaler.mean.values + Y_new * (Yscaler.std.values+1.0e-7)
 
     if multi_dt_flag==1 and node:
         T_new = Y_new[0,0]
         Y_new = Y_new[0,1:]
+
+    if predict_differences:
+        Y_new = Y_new + Yk_m1_ini
 
     # De-log
     if log_transform:

@@ -55,7 +55,7 @@ def compute_nn_cantera_0D_homo(device, model, Xscaler, Yscaler, phi_ini, tempera
 
     equil_bool = False
     n_iter = 0
-    max_sim_time = 1000 * dt  # to limit in case of issues
+    max_sim_time = 10e-3  # to limit in case of issues
     equil_tol = 0.5
 
     while (equil_bool == False) and (simtime < max_sim_time):

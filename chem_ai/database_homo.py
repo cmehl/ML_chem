@@ -10,7 +10,7 @@ from sklearn.model_selection import train_test_split
 
 class Database_HomoReac(object):
 
-    def __init__(self, mech_file, fuel, folder, p, phi_bounds, T0_bounds, n_samples, dt_cfd, max_sim_time, solve_mode, multi_dt, nb_dt, node_sampling):
+    def __init__(self, mech_file, fuel, folder, p, phi_bounds, T0_bounds, n_samples, dt_cfd, max_sim_time, solve_mode, multi_dt, nb_dt, node_sampling, rdm_sample):
 
         self.mech_file = mech_file
         self.fuel = fuel
@@ -40,6 +40,7 @@ class Database_HomoReac(object):
         self.multi_dt = multi_dt
         self.nb_dt = nb_dt
         self.node_sampling = node_sampling
+        self.rdm_sample = rdm_sample
 
 
 
@@ -219,11 +220,18 @@ class Database_HomoReac(object):
                 #     self.dt_array = np.sort(self.dt_array, axis=1)
 
                 # Version imposing lowest dt   -> This should not be needed
-                self.dt_array = np.empty(((self.data_simu.shape[0], self.nb_dt)))
-                self.dt_array[:,0] = self.dt_cfd * np.ones(self.data_simu.shape[0])
-                if self.nb_dt>1:
-                    self.dt_array[:,1:] = np.random.uniform(low=np.log(self.dt_cfd), high=np.log(dt_max), size=(self.data_simu.shape[0], self.nb_dt-1))
-                    self.dt_array[:,1:] = np.exp(self.dt_array[:,1:])
+                if self.rdm_sample:
+                    self.dt_array = np.empty(((self.data_simu.shape[0], self.nb_dt)))
+                    self.dt_array[:,0] = self.dt_cfd * np.ones(self.data_simu.shape[0])
+                    if self.nb_dt>1:
+                        self.dt_array[:,1:] = np.random.uniform(low=np.log(self.dt_cfd), high=np.log(dt_max), size=(self.data_simu.shape[0], self.nb_dt-1))
+                        self.dt_array[:,1:] = np.exp(self.dt_array[:,1:])
+                else:
+                    self.dt_array = np.empty((self.data_simu.shape[0], self.nb_dt))
+                    dt_vect = np.linspace(np.log(self.dt_cfd), np.log(dt_max), self.nb_dt)
+                    dt_vect = np.exp(dt_vect)
+                    for k in range(self.dt_array.shape[0]):
+                        self.dt_array[k,:] = dt_vect
 
 
         if self.multi_dt:

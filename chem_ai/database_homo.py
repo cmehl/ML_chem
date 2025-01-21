@@ -13,7 +13,7 @@ from sklearn.model_selection import train_test_split
 
 class Database_HomoReac(object):
 
-    def __init__(self, mech_file, fuel, folder, p, phi_bounds, T0_bounds, n_samples, dt_cfd, max_sim_time, solve_mode):
+    def __init__(self, mech_file, fuel, folder, p, phi_bounds, T0_bounds, n_samples, dt_cfd, max_sim_time, solve_mode, multi_dt, nb_dt, node_sampling, rdm_sample):
 
         self.mech_file = mech_file
         self.fuel = fuel
@@ -38,6 +38,12 @@ class Database_HomoReac(object):
 
         # Run 0D reactors
         self._run_0D_reactors(max_sim_time)
+
+        # Multiple time steps
+        self.multi_dt = multi_dt
+        self.nb_dt = nb_dt
+        self.node_sampling = node_sampling
+        self.rdm_sample = rdm_sample
 
 
 
@@ -168,7 +174,7 @@ class Database_HomoReac(object):
 
 
 
-    def generate_train_valid_test(self, valid_ratio, test_ratio):
+    def generate_train_valid_test(self, valid_ratio, test_ratio, dt_max):
 
         # In this function we use the 0D reactors runs to build the X_train, Y_train, X_val, Y_val, X_test, Y_test data
         # Train, validation and test are based on simulations numbers, not states
@@ -196,25 +202,83 @@ class Database_HomoReac(object):
         ax.set_ylabel("Phi [-]")
         fig.savefig(os.path.join(self.folder,"doe_0D_reactors.png"))
 
+        # DOE for multi_dt
+        if self.multi_dt:
+            #If NODE, we set the same dt's for each sample, to ease the NODE integration and the loss function calculation
+            if self.node_sampling:
+                self.dt_array = np.empty((self.data_simu.shape[0], self.nb_dt))
+                dt_vect = np.linspace(np.log(self.dt_cfd), np.log(dt_max), self.nb_dt)
+                dt_vect = np.exp(dt_vect)
+                for k in range(self.dt_array.shape[0]):
+                    self.dt_array[k,:] = dt_vect
+            else:
+                # Normal version
+                # self.dt_array = np.random.uniform(low=0.0, high=self.dt_cfd, size=(self.data_simu.shape[0], self.nb_dt))
+                # Log version
+                # self.dt_array = np.random.uniform(low=np.log(self.dt_cfd), high=np.log(dt_max), size=(self.data_simu.shape[0], self.nb_dt))
+                # self.dt_array = np.exp(self.dt_array)
+                # #
+                # # If NODE sampling, we sort the dt's
+                # if self.node_sampling:
+                #     self.dt_array = np.sort(self.dt_array, axis=1)
 
-        self.X_train, self.Y_train = self._get_X_Y(self.id_sim_train)
-        self.X_val, self.Y_val = self._get_X_Y(self.id_sim_val)
-        # self.X_test, self.Y_test = self._get_X_Y(self.id_sim_test)   -> not needed as we will test on trajectories, not points
+                # Version imposing lowest dt   -> This should not be needed
+                if self.rdm_sample:
+                    self.dt_array = np.empty(((self.data_simu.shape[0], self.nb_dt)))
+                    self.dt_array[:,0] = self.dt_cfd * np.ones(self.data_simu.shape[0])
+                    if self.nb_dt>1:
+                        self.dt_array[:,1:] = np.random.uniform(low=np.log(self.dt_cfd), high=np.log(dt_max), size=(self.data_simu.shape[0], self.nb_dt-1))
+                        self.dt_array[:,1:] = np.exp(self.dt_array[:,1:])
+                else:
+                    self.dt_array = np.empty((self.data_simu.shape[0], self.nb_dt))
+                    dt_vect = np.linspace(np.log(self.dt_cfd), np.log(dt_max), self.nb_dt)
+                    dt_vect = np.exp(dt_vect)
+                    for k in range(self.dt_array.shape[0]):
+                        self.dt_array[k,:] = dt_vect
+
+
+        if self.multi_dt:
+            self.dt_array_train, self.X_train, self.Y_train = self._get_X_Y_multi_dt(self.id_sim_train)
+            self.dt_array_val, self.X_val, self.Y_val = self._get_X_Y_multi_dt(self.id_sim_val)
+        else:
+            self.X_train, self.Y_train = self._get_X_Y(self.id_sim_train)
+            self.X_val, self.Y_val = self._get_X_Y(self.id_sim_val)
 
         # Shuffle data
         permutation_train = np.random.permutation(self.X_train.shape[0])
-        self.X_train = self.X_train.iloc[permutation_train].reset_index(drop=True)
-        self.Y_train = self.Y_train.iloc[permutation_train].reset_index(drop=True)
+        if self.multi_dt:
+            self.X_train = self.X_train[permutation_train]
+            self.Y_train = self.Y_train[permutation_train]
+            self.dt_array_train = self.dt_array_train[permutation_train]
+        else:
+            self.X_train = self.X_train.iloc[permutation_train].reset_index(drop=True)
+            self.Y_train = self.Y_train.iloc[permutation_train].reset_index(drop=True)
         #
         permutation_val = np.random.permutation(self.X_val.shape[0])
-        self.X_val = self.X_val.iloc[permutation_val].reset_index(drop=True)
-        self.Y_val = self.Y_val.iloc[permutation_val].reset_index(drop=True)
+        if self.multi_dt:
+            self.X_val = self.X_val[permutation_val]
+            self.Y_val = self.Y_val[permutation_val]
+            self.dt_array_val = self.dt_array_val[permutation_val]
+        else:
+            self.X_val = self.X_val.iloc[permutation_val].reset_index(drop=True)
+            self.Y_val = self.Y_val.iloc[permutation_val].reset_index(drop=True)
 
         # Saving data (raw data)
-        self.X_train.to_csv(os.path.join(self.folder,"X_train_raw.csv"), index=False)
-        self.Y_train.to_csv(os.path.join(self.folder,"Y_train_raw.csv"), index=False)
-        self.X_val.to_csv(os.path.join(self.folder,"X_val_raw.csv"), index=False)
-        self.Y_val.to_csv(os.path.join(self.folder,"Y_val_raw.csv"), index=False)
+        if self.multi_dt: # storing 3D tensor in npy format (Y is a 3D tensor)
+            np.save(os.path.join(self.folder,"X_train_raw.npy"), self.X_train)
+            np.save(os.path.join(self.folder,"Y_train_raw.npy"), self.Y_train)
+            np.save(os.path.join(self.folder,"X_val_raw.npy"), self.X_val)
+            np.save(os.path.join(self.folder,"Y_val_raw.npy"), self.Y_val)
+
+            # Saving dt's
+            np.save(os.path.join(self.folder,"dt_array_train.npy"), self.dt_array_train)
+            np.save(os.path.join(self.folder,"dt_array_val.npy"), self.dt_array_val)
+
+        else: # csv
+            self.X_train.to_csv(os.path.join(self.folder,"X_train_raw.csv"), index=False)
+            self.Y_train.to_csv(os.path.join(self.folder,"Y_train_raw.csv"), index=False)
+            self.X_val.to_csv(os.path.join(self.folder,"X_val_raw.csv"), index=False)
+            self.Y_val.to_csv(os.path.join(self.folder,"Y_val_raw.csv"), index=False)
 
 
 
@@ -250,7 +314,7 @@ class Database_HomoReac(object):
                 X.columns = [str(col) + '_X' for col in cols]
                 self.X_cols = X.columns.tolist()
 
-                Y_np = self._advance_dt_cfd(X)
+                Y_np = self._advance_dt_cfd(X, self.dt_cfd)
                 Y_columns = [str(col) + '_Y' for col in cols]
                 Y = pd.DataFrame(data=Y_np, columns = Y_columns)
                 self.Y_cols = Y.columns.tolist()
@@ -276,7 +340,83 @@ class Database_HomoReac(object):
         return X, Y
     
 
-    def _advance_dt_cfd(self, X):
+
+    def _get_X_Y_multi_dt(self, simu_ids):
+
+        # Cantera gas object
+        self.gas = ct.Solution(self.mech_file)
+
+        # Selecting based on simulations ids
+        df_ids = self.data_simu[self.data_simu['Simulation number'].isin(simu_ids)].iloc[:, :-1]
+        dt_array_red = self.dt_array[self.data_simu['Simulation number'].isin(simu_ids)]
+
+        # Initializing X and Y
+        X = np.empty((df_ids.shape[0],df_ids.shape[1]-2)) # -2 because we remove Pressure and Time
+        if self.node_sampling:
+            Y = np.empty((df_ids.shape[0],df_ids.shape[1]-2,self.nb_dt))
+        else:
+            Y = np.empty((df_ids.shape[0],df_ids.shape[1]-3,self.nb_dt)) # -2 because we remove Pressure, Time and temperature
+
+        # Filling X
+        X[:,0] = df_ids["Temperature"]
+        X[:,1:] = df_ids.iloc[:,2:-1]
+
+
+        for i in range(X.shape[0]):
+
+            if self.node_sampling:  # We compute a single trajectory along all dt's
+
+                T = X[i,0]
+                Yk = X[i,1:]
+
+                self.gas.TPY = T, self.p, Yk
+
+                # Constant pressure reactor
+                r = ct.IdealGasConstPressureReactor(self.gas)
+
+                # Initializing reactor
+                sim = ct.ReactorNet([r])
+                
+                for i_dt in range(self.nb_dt):
+
+                    dt = dt_array_red[i,i_dt]
+
+                    # Advancing to dt (each time from previous dt value thus advancing on the trajectory)
+                    sim.advance(dt)
+
+                    # Updated state
+                    Y[i,0,i_dt] = self.gas.T
+                    Y[i,1:,i_dt] = self.gas.Y
+
+            else:  #We compute solution at t+dt for each dt, starting from initial state
+
+                for i_dt in range(self.nb_dt):
+
+                    dt = dt_array_red[i,i_dt]
+
+                    T = X[i,0]
+                    Yk = X[i,1:]
+
+                    self.gas.TPY = T, self.p, Yk
+
+                    # Constant pressure reactor
+                    r = ct.IdealGasConstPressureReactor(self.gas)
+                    
+                    # Initializing reactor
+                    sim = ct.ReactorNet([r])
+                    
+                    # Advancing to dt
+                    sim.advance(dt)
+
+                    # Updated state
+                    Y[i,:,i_dt] = self.gas.Y
+
+
+        return dt_array_red, X, Y
+    
+
+
+    def _advance_dt_cfd(self, X, dt):
 
         Y = np.empty(X.shape)
 
@@ -297,13 +437,13 @@ class Database_HomoReac(object):
             sim = ct.ReactorNet([r])
             
             # Advancing to dt
-            sim.advance(self.dt_cfd)
+            sim.advance(dt)
 
             # Updated state
             Y[k,0] = self.gas.T
             Y[k,1] = self.gas.P
             Y[k,2:-1] = self.gas.Y
-            Y[k,-1] = time + self.dt_cfd
+            Y[k,-1] = time + dt
 
             k+=1
 

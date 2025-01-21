@@ -13,9 +13,10 @@ warnings.filterwarnings(action='ignore', category=UserWarning)
 # HOMOGENEOUS REACTOR
 #-------------------------------------------------------------------
 
-def compute_nn_cantera_0D_homo(device, model, Xscaler, Yscaler, phi_ini, temperature_ini, dt, dtb_params, A_element):
+def compute_nn_cantera_0D_homo(device, model, Xscaler, Yscaler, phi_ini, temperature_ini, dt, dtb_params, A_element, multi_dt_flag, Tscaler, node):
 
     log_transform = dtb_params["log_transform"]
+    predict_differences = dtb_params["predict_differences"]
     threshold = dtb_params["threshold"]
     fuel = dtb_params["fuel"]
     mech_file = dtb_params["mech_file"]
@@ -54,7 +55,7 @@ def compute_nn_cantera_0D_homo(device, model, Xscaler, Yscaler, phi_ini, tempera
 
     equil_bool = False
     n_iter = 0
-    max_sim_time = 1000 * dt  # to limit in case of issues
+    max_sim_time = 10e-3  # to limit in case of issues
     equil_tol = 0.5
 
     while (equil_bool == False) and (simtime < max_sim_time):
@@ -106,7 +107,7 @@ def compute_nn_cantera_0D_homo(device, model, Xscaler, Yscaler, phi_ini, tempera
             crashed = True
             continue
 
-        T_new, Y_new = advance_ANN(state_current, model, Xscaler, Yscaler, gas, log_transform, threshold, device)
+        T_new, Y_new = advance_ANN(state_current, model, Xscaler, Yscaler, Tscaler, dt, multi_dt_flag, gas, log_transform, threshold, predict_differences, device, node)
 
         state_current = np.append(T_new, Y_new)
 
@@ -154,10 +155,18 @@ def compute_nn_cantera_0D_homo(device, model, Xscaler, Yscaler, phi_ini, tempera
 
 
 
-def advance_ANN(state_current, model, Xscaler, Yscaler, gas, log_transform, threshold, device):
+def advance_ANN(state_current, model, Xscaler, Yscaler, Tscaler, dt, multi_dt_flag, gas, log_transform, threshold, predict_differences, device, node):
 
     T_m1 = np.copy(state_current[0])
     Yk_m1 = np.copy(state_current[1:])
+
+    if predict_differences:
+        Yk_m1_ini = np.copy(Yk_m1)
+
+        if log_transform:
+            Yk_m1_ini[Yk_m1_ini<threshold] = threshold
+            Yk_m1_ini = np.log(Yk_m1_ini)
+
 
     # Log transform
     if log_transform:
@@ -165,27 +174,57 @@ def advance_ANN(state_current, model, Xscaler, Yscaler, gas, log_transform, thre
         state_current[1:] = np.log(state_current[1:])
 
     # Scaling
-    state_current_scaled = (state_current-Xscaler.mean.values)/(Xscaler.std.values+1.0e-7)
-    state_current_scaled = state_current_scaled.reshape(-1, 1).T
+    if multi_dt_flag>0:
+        state_current_scaled = (state_current-Xscaler.mean)/(Xscaler.std+1.0e-7)
+        state_current_scaled = state_current_scaled.reshape(-1, 1).T
+    else:
+        state_current_scaled = (state_current-Xscaler.mean.values)/(Xscaler.std.values+1.0e-7)
+        state_current_scaled = state_current_scaled.reshape(-1, 1).T
 
+    # If multi dt we add (scaled) time
+    if (multi_dt_flag==2) or (multi_dt_flag==1 and node==False):
+        dt_scaled = np.log(dt)
+        dt_scaled = (dt_scaled-Tscaler.mean)/(Tscaler.std+1.0e-7)
+        state_current_scaled = np.append(state_current_scaled, dt_scaled)
+    # elif multi_dt_flag==2:
+    #     dt_scaled = np.log(dt)
+    #     state_current_scaled = np.append(state_current_scaled, dt_scaled)
 
     # Apply NN
     with torch.no_grad():
         NN_input = torch.from_numpy(state_current_scaled).to(device)
-        Y_new = model(NN_input)
-    #Back to cpu numpy
+
+        if node:
+            integration_times = torch.tensor([0,dt], dtype=torch.float64)
+            Y_new = model(NN_input, integration_time=integration_times)[1]
+
+        else:
+            Y_new = model(NN_input.reshape(1,-1))
+            # Y_new = Y_new.reshape(1,1)
+
+    # Back to cpu numpy
     Y_new = Y_new.cpu().numpy()
 
     # De-transform
-    Y_new = Yscaler.mean.values + Y_new * (Yscaler.std.values+1.0e-7)
+    if multi_dt_flag>0:
+        Y_new = Yscaler.mean + Y_new * (Yscaler.std+1.0e-7)
+    else:
+        Y_new = Yscaler.mean.values + Y_new * (Yscaler.std.values+1.0e-7)
+
+    if multi_dt_flag==1 and node:
+        T_new = Y_new[0,0]
+        Y_new = Y_new[0,1:]
+
+    if predict_differences:
+        Y_new = Y_new + Yk_m1_ini
 
     # De-log
     if log_transform:
         Y_new = np.exp(Y_new)
 
-
     # Deducing T from energy conservation
-    T_new = T_m1 - (1/gas.cp)*np.sum(gas.partial_molar_enthalpies/gas.molecular_weights*(Y_new-Yk_m1))
+    if node==False:
+        T_new = T_m1 - (1/gas.cp)*np.sum(gas.partial_molar_enthalpies/gas.molecular_weights*(Y_new-Yk_m1))
 
     return T_new, Y_new
 

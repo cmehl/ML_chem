@@ -58,7 +58,12 @@ def compute_nn_cantera_0D_homo(device, model, Xscaler, Yscaler, phi_ini, tempera
     max_sim_time = 10e-3  # to limit in case of issues
     equil_tol = 0.5
 
+    # Tolerance on temperature slope
+    dT_dt_tol = 0.1 / dt
+
     while (equil_bool == False) and (simtime < max_sim_time):
+
+        T_m1 = r.T
 
         simtime += dt
         sim.advance(simtime)
@@ -69,9 +74,12 @@ def compute_nn_cantera_0D_homo(device, model, Xscaler, Yscaler, phi_ini, tempera
         residual = 100.0*np.linalg.norm(state_equil - state_current,ord=np.inf)/np.linalg.norm(state_equil,
                                                                                                 ord=np.inf)
         
-        n_iter +=1
+        
+        dT_dt = (r.T-T_m1)/dt
+        
+        n_iter+=1
         # max iteration                    
-        if residual < equil_tol:
+        if residual < equil_tol and np.abs(dT_dt)<dT_dt_tol:
             equil_bool = True
 
 

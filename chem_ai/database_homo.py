@@ -81,6 +81,9 @@ class Database_HomoReac(object):
             phi_ini = row['Phi']
             temperature_ini = row['T0']
 
+            # Tolerance on temperature slope
+            dT_dt_tol = 0.1 / self.dt_cfd
+
             print(f"T0={temperature_ini}; phi={phi_ini}")
 
             # Initial gas state
@@ -110,12 +113,15 @@ class Database_HomoReac(object):
             n_iter = 0
 
             while (equil_bool == False) and (time < max_sim_time):
+
+                T_m1 = r.T
                 
                 if self.solve_mode=="dt_cfd":
                     time += self.dt_cfd
                     sim.advance(time)
                     states.append(r.thermo.state, t=time)
                 elif self.solve_mode=="dt_cvode":
+                    time_m1 = time
                     t_cvode = sim.step()
                     time = t_cvode
                     if n_iter%5==0:   # dt_cvode gives too many points
@@ -129,9 +135,18 @@ class Database_HomoReac(object):
                 residual = 100.0*np.linalg.norm(state_equil - state_current,ord=np.inf)/np.linalg.norm(state_equil,
                                                                                                            ord=np.inf)
                 
+                # Checking that temperature profile is flat (else if T is not monotonic, we have issues)
+                if self.solve_mode=="dt_cfd":
+                    dt = self.dt_cfd
+                elif self.solve_mode=="dt_cvode":
+                    dt = time- time_m1
+                
+                dT_dt = (r.T-T_m1)/dt
+
+                
                 n_iter +=1
                 # max iteration                    
-                if residual < equil_tol:
+                if residual < equil_tol and np.abs(dT_dt)<dT_dt_tol:
                     equil_bool = True
             
             # ============================== Construction of the database =========

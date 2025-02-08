@@ -1,5 +1,5 @@
 import os, sys
-import pyDOE
+from scipy.stats import qmc
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
@@ -54,7 +54,10 @@ class DatabaseFlamelets(object):
 
          # DOE 0D REACTORS
          # Initially lhs gives numbers between 0 and 1
-        self.df_ODE_0D = pd.DataFrame(data=pyDOE.lhs(n=2, samples=n_samples, criterion='maximin'), columns=['Phi', 'T0'])
+        seed = 42
+        sampler = qmc.LatinHypercube(d=2, seed=seed) 
+        samples = sampler.random(n=self.n_samples)
+        self.df_ODE_0D = pd.DataFrame(data=samples, columns=['Phi', 'T0'])
         
         self.df_ODE_0D["sim_number"] = self.sim_numbers_0D 
         

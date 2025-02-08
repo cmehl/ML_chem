@@ -1,5 +1,5 @@
 import os, sys
-import pyDOE
+from scipy.stats import qmc
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
@@ -50,7 +50,10 @@ class Database_HomoReac(object):
     def _generate_doe(self):
         
         # Initially lhs gives numbers between 0 and 1
-        self.df_ODE = pd.DataFrame(data=pyDOE.lhs(n=2, samples=self.n_samples, criterion='maximin'), columns=['Phi', 'T0'])
+        seed = 42
+        sampler = qmc.LatinHypercube(d=2, seed=seed) 
+        samples = sampler.random(n=self.n_samples)
+        self.df_ODE = pd.DataFrame(data=samples, columns=['Phi', 'T0'])
         
         self.df_ODE["sim_number"] = self.sim_numbers 
         
@@ -189,7 +192,9 @@ class Database_HomoReac(object):
 
 
 
-    def generate_train_valid_test(self, valid_ratio, test_ratio, dt_max):
+    def generate_train_valid_test(self, valid_ratio, test_ratio, dt_min, dt_max, extend_database):
+
+        np.random.seed(2025)
 
         # In this function we use the 0D reactors runs to build the X_train, Y_train, X_val, Y_val, X_test, Y_test data
         # Train, validation and test are based on simulations numbers, not states
@@ -219,18 +224,23 @@ class Database_HomoReac(object):
 
         # DOE for multi_dt
         if self.multi_dt:
+            
+            # If database extension
+            fact_max = extend_database
+            fact_min = 1.0 - (extend_database - 1.0)
+
             #If NODE, we set the same dt's for each sample, to ease the NODE integration and the loss function calculation
             if self.node_sampling:
                 self.dt_array = np.empty((self.data_simu.shape[0], self.nb_dt))
-                dt_vect = np.linspace(np.log(self.dt_cfd), np.log(dt_max), self.nb_dt)
+                dt_vect = np.linspace(np.log(dt_min), np.log(dt_max), self.nb_dt)
                 dt_vect = np.exp(dt_vect)
                 for k in range(self.dt_array.shape[0]):
                     self.dt_array[k,:] = dt_vect
             else:
                 # Normal version
-                # self.dt_array = np.random.uniform(low=0.0, high=self.dt_cfd, size=(self.data_simu.shape[0], self.nb_dt))
+                # self.dt_array = np.random.uniform(low=0.0, high=dt_min, size=(self.data_simu.shape[0], self.nb_dt))
                 # Log version
-                # self.dt_array = np.random.uniform(low=np.log(self.dt_cfd), high=np.log(dt_max), size=(self.data_simu.shape[0], self.nb_dt))
+                # self.dt_array = np.random.uniform(low=np.log(dt_min), high=np.log(dt_max), size=(self.data_simu.shape[0], self.nb_dt))
                 # self.dt_array = np.exp(self.dt_array)
                 # #
                 # # If NODE sampling, we sort the dt's
@@ -239,14 +249,17 @@ class Database_HomoReac(object):
 
                 # Version imposing lowest dt   -> This should not be needed
                 if self.rdm_sample:
-                    self.dt_array = np.empty(((self.data_simu.shape[0], self.nb_dt)))
-                    self.dt_array[:,0] = self.dt_cfd * np.ones(self.data_simu.shape[0])
-                    if self.nb_dt>1:
-                        self.dt_array[:,1:] = np.random.uniform(low=np.log(self.dt_cfd), high=np.log(dt_max), size=(self.data_simu.shape[0], self.nb_dt-1))
-                        self.dt_array[:,1:] = np.exp(self.dt_array[:,1:])
+                    # self.dt_array = np.empty(((self.data_simu.shape[0], self.nb_dt)))
+                    # self.dt_array[:,0] = dt_min * np.ones(self.data_simu.shape[0])
+                    # if self.nb_dt>1:
+                    #     self.dt_array[:,1:] = np.random.uniform(low=np.log(dt_min), high=np.log(dt_max), size=(self.data_simu.shape[0], self.nb_dt-1))
+                    #     self.dt_array[:,1:] = np.exp(self.dt_array[:,1:])
+
+                    self.dt_array = np.random.uniform(low=np.log(fact_min*dt_min), high=np.log(fact_max*dt_max), size=(self.data_simu.shape[0], self.nb_dt))
+                    self.dt_array = np.exp(self.dt_array)
                 else:
                     self.dt_array = np.empty((self.data_simu.shape[0], self.nb_dt))
-                    dt_vect = np.linspace(np.log(self.dt_cfd), np.log(dt_max), self.nb_dt)
+                    dt_vect = np.linspace(np.log(dt_min), np.log(dt_max), self.nb_dt)
                     dt_vect = np.exp(dt_vect)
                     for k in range(self.dt_array.shape[0]):
                         self.dt_array[k,:] = dt_vect

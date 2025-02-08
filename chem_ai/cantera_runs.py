@@ -191,7 +191,8 @@ def advance_ANN(state_current, model, Xscaler, Yscaler, Tscaler, dt, multi_dt_fl
 
     # If multi dt we add (scaled) time
     if (multi_dt_flag==2) or (multi_dt_flag==1 and node==False):
-        dt_scaled = np.log(dt)
+        # dt_scaled = np.log(dt)
+        dt_scaled = dt
         dt_scaled = (dt_scaled-Tscaler.mean)/(Tscaler.std+1.0e-7)
         state_current_scaled = np.append(state_current_scaled, dt_scaled)
     # elif multi_dt_flag==2:
